@@ -1,4 +1,4 @@
-# @accrue/granola-mcp
+# granola-mcp-plus
 
 A Model Context Protocol (MCP) server that provides access to your Granola notes, documents, transcripts, and calendar events using the Granola API.
 
@@ -37,7 +37,7 @@ Add to your MCP configuration:
   "mcpServers": {
     "granola": {
       "command": "npx",
-      "args": ["-y", "@accrue/granola-mcp"]
+      "args": ["-y", "granola-mcp-plus"]
     }
   }
 }

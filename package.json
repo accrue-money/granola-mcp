@@ -1,6 +1,6 @@
 {
-  "name": "@accrue/granola-mcp",
-  "version": "1.1.0",
+  "name": "granola-mcp-plus",
+  "version": "1.1.1",
   "description": "MCP server for Granola with shared folder access, raw transcripts, and workspace support",
   "type": "module",
   "main": "dist/index.js",
@@ -13,13 +13,19 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "granola-mcp-plus": "^1.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   },
-  "keywords": ["mcp", "granola", "meeting-notes", "transcripts"],
+  "keywords": [
+    "mcp",
+    "granola",
+    "meeting-notes",
+    "transcripts"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
