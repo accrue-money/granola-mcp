@@ -147,6 +147,68 @@ const tools: Tool[] = [
       },
     },
   },
+  {
+    name: "list_granola_folders",
+    description: "List all Granola folders (document lists), including shared folders.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "get_granola_folder_documents",
+    description: "Get all documents in a folder by ID. Works for shared folders.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        folder_id: {
+          type: "string",
+          description: "The folder ID to retrieve documents from",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of documents to return (default: 50)",
+        },
+      },
+      required: ["folder_id"],
+    },
+  },
+  {
+    name: "get_granola_shared_document",
+    description: "Get full content of any document by ID (including shared documents).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        document_id: {
+          type: "string",
+          description: "The document ID to retrieve",
+        },
+      },
+      required: ["document_id"],
+    },
+  },
+  {
+    name: "get_granola_raw_transcript",
+    description: "Get raw utterance-level transcript with timestamps and speaker sources.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        document_id: {
+          type: "string",
+          description: "The document ID to get transcript for",
+        },
+      },
+      required: ["document_id"],
+    },
+  },
+  {
+    name: "list_granola_workspaces",
+    description: "List all workspaces (organizations) you have access to.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -476,6 +538,138 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               ),
             },
           ],
+        };
+      }
+
+      case "list_granola_folders": {
+        const folders = await apiClient.fetchDocumentLists();
+        const result = folders.map((folder: any) => ({
+          id: folder.id,
+          title: folder.title || folder.name,
+          description: folder.description,
+          icon: folder.icon,
+          document_count: folder.documents?.length || 0,
+          parent_folder_id: folder.parent_document_list_id,
+        }));
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "get_granola_folder_documents": {
+        const folderId = args?.folder_id as string;
+        const limit = (args?.limit as number) || 50;
+
+        const folders = await apiClient.fetchDocumentLists();
+        const folder = folders.find((f: any) => f.id === folderId);
+
+        if (!folder) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "Folder not found" }) }],
+            isError: true,
+          };
+        }
+
+        const allDocIds = folder.document_ids || folder.documents?.map((d: any) => d.id) || [];
+        const docIds = allDocIds.slice(0, limit);
+
+        if (docIds.length === 0) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ folder_title: folder.title || folder.name, documents: [] }) }],
+          };
+        }
+
+        const documents = await apiClient.fetchDocumentsBatch(docIds);
+        const result = {
+          folder_title: folder.title || folder.name,
+          folder_id: folder.id,
+          total_documents: allDocIds.length,
+          returned_documents: documents.length,
+          documents: documents.map((doc: any) => ({
+            id: doc.id,
+            title: doc.title || "Untitled",
+            created_at: doc.created_at,
+            updated_at: doc.updated_at,
+            type: doc.type,
+            owner_id: doc.user_id,
+          })),
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "get_granola_shared_document": {
+        const documentId = args?.document_id as string;
+        const documents = await apiClient.fetchDocumentsBatch([documentId]);
+
+        if (!documents || documents.length === 0) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "Document not found" }) }],
+            isError: true,
+          };
+        }
+
+        const doc = documents[0];
+        let markdown = "";
+        if (doc.last_viewed_panel?.content?.type === "doc") {
+          markdown = convertProseMirrorToMarkdown(doc.last_viewed_panel.content);
+        } else if (doc.notes?.type === "doc") {
+          markdown = convertProseMirrorToMarkdown(doc.notes);
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              id: doc.id,
+              title: doc.title || "Untitled",
+              owner_id: doc.user_id,
+              workspace_id: doc.workspace_id,
+              created_at: doc.created_at,
+              updated_at: doc.updated_at,
+              type: doc.type,
+              content: markdown || doc.content || "No content available",
+              google_calendar_event: doc.google_calendar_event,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "get_granola_raw_transcript": {
+        const documentId = args?.document_id as string;
+        const utterances = await apiClient.fetchDocumentTranscript(documentId);
+
+        if (!utterances || utterances.length === 0) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "No transcript found for this document" }) }],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              document_id: documentId,
+              utterance_count: utterances.length,
+              utterances: utterances.map((u: any) => ({
+                source: u.source,
+                text: u.text,
+                start: u.start_timestamp,
+                end: u.end_timestamp,
+                confidence: u.confidence,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "list_granola_workspaces": {
+        const workspaces = await apiClient.fetchWorkspaces();
+        // Return raw data to preserve all fields from API
+        return {
+          content: [{ type: "text", text: JSON.stringify(workspaces, null, 2) }],
         };
       }
 

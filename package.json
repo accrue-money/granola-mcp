@@ -1,9 +1,12 @@
 {
-  "name": "granola-mcp-server",
-  "version": "1.0.0",
-  "description": "Local MCP server for accessing Granola notes and documents",
+  "name": "@accrue/granola-mcp",
+  "version": "1.1.0",
+  "description": "MCP server for Granola with shared folder access, raw transcripts, and workspace support",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "granola-mcp": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -15,6 +18,11 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
+  },
+  "keywords": ["mcp", "granola", "meeting-notes", "transcripts"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/accrue-money/granola-mcp"
   }
 }
-

@@ -1,74 +1,201 @@
-# Granola MCP Server
+# @accrue/granola-mcp
 
 A Model Context Protocol (MCP) server that provides access to your Granola notes, documents, transcripts, and calendar events using the Granola API.
 
+**Enhanced fork** with shared folder access, raw transcripts, workspace support, and automatic token refresh.
+
 ## Features
 
-- 🔍 **Search Notes**: Search through all your Granola documents/notes
-- 📝 **Search Transcripts**: Find meeting transcripts by content
-- 📅 **Search Events**: Search calendar events
-- 📋 **Search Panels**: Search structured note panels
-- 📄 **Get Documents**: Retrieve specific documents by ID
-- 📊 **List Documents**: List all available documents
+### Original Tools
+- **search_granola_notes** - Search through all your Granola documents/notes
+- **search_granola_transcripts** - Find meeting transcripts by content
+- **search_granola_events** - Search calendar events
+- **search_granola_panels** - Search structured note panels
+- **get_granola_document** - Retrieve specific documents by ID
+- **get_granola_transcript** - Get a specific transcript
+- **list_granola_documents** - List all available documents
+
+### New Tools (v1.1.0)
+- **list_granola_folders** - List all folders including shared folders from your team
+- **get_granola_folder_documents** - Get documents in a folder by ID (works for shared folders)
+- **get_granola_shared_document** - Fetch full content of any document by ID (including shared)
+- **get_granola_raw_transcript** - Get raw utterance-level transcript with timestamps and speaker sources
+- **list_granola_workspaces** - List all workspaces/organizations you have access to
+
+### Improvements
+- Automatic WorkOS token refresh (prevents auth failures after 6 hours)
+- Access to shared team folders and documents
 
 ## Installation
 
-1. Install dependencies:
+### Via npx (Recommended)
 
-```bash
-cd granola-mcp-server
-npm install
+Add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "granola": {
+      "command": "npx",
+      "args": ["-y", "@accrue/granola-mcp"]
+    }
+  }
+}
 ```
 
-2. Build the server:
+### From Source
 
 ```bash
+git clone https://github.com/accrue-money/granola-mcp.git
+cd granola-mcp
+npm install
 npm run build
 ```
 
-## Configuration in Cursor
-
-Add this to your Cursor MCP configuration (usually in `.cursor/mcp.json` or Cursor Settings):
+Then configure with the local path:
 
 ```json
 {
   "mcpServers": {
     "granola": {
       "command": "node",
-      "args": ["/absolute/path/to/granola-mcp-server/dist/index.js"]
+      "args": ["/path/to/granola-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-**Important**: Replace `/absolute/path/to/granola-mcp-server/dist/index.js` with the actual absolute path to your built server.
+## Requirements
 
-## Usage
+- Granola desktop app must be installed and logged in
+- Credentials are read from: `~/Library/Application Support/Granola/supabase.json`
 
-Once configured, you can use the MCP tools in Cursor:
+## Tool Reference
 
-- `search_granola_notes` - Search documents by query
-- `search_granola_transcripts` - Search meeting transcripts
-- `search_granola_events` - Search calendar events
-- `search_granola_panels` - Search document panels
-- `get_granola_document` - Get a specific document
-- `get_granola_transcript` - Get a specific transcript
-- `list_granola_documents` - List all documents
+### list_granola_folders
 
-## How It Works
+List all folders (document lists), including shared folders from your team.
 
-The server uses Granola's API with credentials stored locally at:
+**Input:** None
 
+**Output:**
+```json
+[
+  {
+    "id": "folder-uuid",
+    "title": "Folder Name",
+    "description": "Optional description",
+    "icon": { "type": "icon", "color": "blue", "value": "FolderIcon" },
+    "document_count": 48,
+    "parent_folder_id": null
+  }
+]
 ```
-~/Library/Application Support/Granola/supabase.json
+
+### get_granola_folder_documents
+
+Get all documents in a folder by ID. Works for shared folders.
+
+**Input:**
+- `folder_id` (required): The folder ID
+- `limit` (optional): Max documents to return (default: 50)
+
+**Output:**
+```json
+{
+  "folder_title": "Folder Name",
+  "folder_id": "folder-uuid",
+  "total_documents": 48,
+  "returned_documents": 5,
+  "documents": [
+    {
+      "id": "doc-uuid",
+      "title": "Meeting Title",
+      "created_at": "2026-01-26T19:47:34.882Z",
+      "updated_at": "2026-01-27T13:42:44.165Z",
+      "type": "meeting",
+      "owner_id": "user-uuid"
+    }
+  ]
+}
 ```
 
-It fetches data from the Granola API and provides search/retrieval capabilities over:
+### get_granola_shared_document
 
-- Documents (notes)
-- Meeting transcripts
-- Calendar events
-- Document panels (structured note sections)
+Get full content of any document by ID (including shared documents).
+
+**Input:**
+- `document_id` (required): The document ID
+
+**Output:**
+```json
+{
+  "id": "doc-uuid",
+  "title": "Meeting Title",
+  "owner_id": "user-uuid",
+  "workspace_id": "workspace-uuid",
+  "created_at": "2026-01-26T19:47:34.882Z",
+  "updated_at": "2026-01-27T13:42:44.165Z",
+  "type": "meeting",
+  "content": "### Meeting Notes\n\n- Key point 1\n- Key point 2",
+  "google_calendar_event": {
+    "summary": "Meeting Title",
+    "attendees": [...],
+    "start": {...},
+    "end": {...}
+  }
+}
+```
+
+### get_granola_raw_transcript
+
+Get raw utterance-level transcript with timestamps and speaker sources.
+
+**Input:**
+- `document_id` (required): The document ID
+
+**Output:**
+```json
+{
+  "document_id": "doc-uuid",
+  "utterance_count": 267,
+  "utterances": [
+    {
+      "source": "microphone",
+      "text": "Let me explain the proposal...",
+      "start": "2026-01-26T19:47:47.672Z",
+      "end": "2026-01-26T19:48:07.752Z"
+    },
+    {
+      "source": "system",
+      "text": "That sounds good.",
+      "start": "2026-01-26T19:48:08.030Z",
+      "end": "2026-01-26T19:48:09.190Z"
+    }
+  ]
+}
+```
+
+### list_granola_workspaces
+
+List all workspaces (organizations) you have access to.
+
+**Input:** None
+
+**Output:**
+```json
+[
+  {
+    "workspace": {
+      "workspace_id": "workspace-uuid",
+      "slug": "company.com",
+      "display_name": "Company Name",
+      "plan_type": "business"
+    },
+    "role": "member"
+  }
+]
+```
 
 ## Development
 
@@ -83,8 +210,10 @@ npm run dev
 npm start
 ```
 
-## Notes
+## License
 
-- Requires Granola to be installed and logged in (credentials are read from local config)
-- Data is fetched from the Granola API in real-time
+MIT
 
+## Credits
+
+Forked from [btn0s/granola-mcp](https://github.com/btn0s/granola-mcp)
