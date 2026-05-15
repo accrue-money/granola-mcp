@@ -22,6 +22,9 @@ A Model Context Protocol (MCP) server that provides access to your Granola notes
 - **get_granola_raw_transcript** - Get raw utterance-level transcript with timestamps and speaker sources
 - **list_granola_workspaces** - List all workspaces/organizations you have access to
 
+### New in v1.2.0 (May 2026)
+- **Encrypted-token-era auth support.** Granola.app's May 2026 release encrypted `supabase.json` → `supabase.json.enc` and stopped writing plaintext refresh tokens. v1.2.0 reads JWT from the plaintext `stored-accounts.json` sibling file (which Granola.app auto-refreshes during normal usage) and falls back to legacy `supabase.json` only for older Granola installs. No more 401s after Granola updates.
+
 ### Improvements
 - Automatic WorkOS token refresh (prevents auth failures after 6 hours)
 - Access to shared team folders and documents

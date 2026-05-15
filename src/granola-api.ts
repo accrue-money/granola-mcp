@@ -30,7 +30,48 @@ export class GranolaApiClient {
   private tokenExpiry: number = 0;
   private readonly apiUrl = "https://api.granola.ai/v2/get-documents";
 
+  // As of May 2026, Granola.app encrypts supabase.json -> supabase.json.enc.
+  // The plaintext access_token now lives in stored-accounts.json instead, which
+  // Granola.app auto-refreshes on normal usage (~6h JWT lifetime). Try that
+  // path first; fall back to legacy supabase.json for older Granola installs.
   private loadCredentials(): string | null {
+    const storedAccountsToken = this.tryLoadFromStoredAccounts();
+    if (storedAccountsToken) return storedAccountsToken;
+
+    const supabaseToken = this.tryLoadFromSupabaseJson();
+    if (supabaseToken) return supabaseToken;
+
+    console.error(
+      `Granola auth failed: neither stored-accounts.json nor supabase.json could be read at ${GRANOLA_APP_SUPPORT_PATH}. Is Granola.app installed and signed in?`
+    );
+    return null;
+  }
+
+  private tryLoadFromStoredAccounts(): string | null {
+    try {
+      const path = join(GRANOLA_APP_SUPPORT_PATH, "stored-accounts.json");
+      const fileContent = readFileSync(path, "utf-8");
+      const data = JSON.parse(fileContent);
+
+      const accounts = JSON.parse(data.accounts);
+      if (!Array.isArray(accounts) || accounts.length === 0) return null;
+
+      const tokens = JSON.parse(accounts[0].tokens);
+      const accessToken = tokens.access_token;
+      if (!accessToken) return null;
+
+      // stored-accounts.json doesn't carry expires_in/obtained_at; assume 6h
+      // from the file's mtime. Granola.app refreshes the file as part of
+      // normal usage, so re-reading on cache miss is sufficient.
+      this.tokenExpiry = Date.now() + 6 * 60 * 60 * 1000;
+      this.accessToken = accessToken;
+      return accessToken;
+    } catch {
+      return null;
+    }
+  }
+
+  private tryLoadFromSupabaseJson(): string | null {
     try {
       const credsPath = join(GRANOLA_APP_SUPPORT_PATH, "supabase.json");
       const fileContent = readFileSync(credsPath, "utf-8");
@@ -38,15 +79,15 @@ export class GranolaApiClient {
 
       const workosTokens = JSON.parse(data.workos_tokens);
       const accessToken = workosTokens.access_token;
-      const expiresIn = workosTokens.expires_in || 21600; // Default 6 hours
+      if (!accessToken) return null;
+
+      const expiresIn = workosTokens.expires_in || 21600;
       const obtainedAt = workosTokens.obtained_at || Date.now();
 
       this.tokenExpiry = obtainedAt + expiresIn * 1000;
       this.accessToken = accessToken;
-
       return accessToken;
-    } catch (error) {
-      console.error("Error loading Granola credentials:", error);
+    } catch {
       return null;
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "granola-mcp-plus",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "MCP server for Granola with shared folder access, raw transcripts, and workspace support",
   "type": "module",
   "main": "dist/index.js",
@@ -13,8 +13,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "granola-mcp-plus": "^1.1.1"
+    "@modelcontextprotocol/sdk": "^1.0.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
