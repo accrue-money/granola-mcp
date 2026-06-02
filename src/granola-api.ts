@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { execFileSync } from "child_process";
+import { createDecipheriv, pbkdf2Sync } from "crypto";
 
 const GRANOLA_APP_SUPPORT_PATH = join(
   homedir(),
@@ -8,6 +10,59 @@ const GRANOLA_APP_SUPPORT_PATH = join(
   "Application Support",
   "Granola"
 );
+
+// Granola.app v5.354+ wraps a 32-byte AES-256-GCM data encryption key (DEK)
+// in storage.dek via Electron's safeStorage (Chromium OSCrypt: v10 prefix +
+// AES-128-CBC + PBKDF2-SHA1(keychain-key-base64-string, "saltysalt", 1003)).
+// Per-file blobs are [12-byte IV][ciphertext][16-byte GCM tag].
+let cachedDek: Buffer | null = null;
+
+function loadGranolaDek(): Buffer | null {
+  if (cachedDek) return cachedDek;
+  try {
+    const keyB64 = execFileSync(
+      "security",
+      ["find-generic-password", "-s", "Granola Safe Storage", "-w"],
+      { encoding: "utf-8" }
+    ).trim();
+    const password = Buffer.from(keyB64, "utf-8");
+    const kek = pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+    const dekBlob = readFileSync(
+      join(GRANOLA_APP_SUPPORT_PATH, "storage.dek")
+    );
+    if (dekBlob.subarray(0, 3).toString() !== "v10") return null;
+    const iv = Buffer.alloc(16, 0x20);
+    const decipher = createDecipheriv("aes-128-cbc", kek, iv);
+    const dekBase64 = Buffer.concat([
+      decipher.update(dekBlob.subarray(3)),
+      decipher.final(),
+    ]).toString("utf-8");
+    const dek = Buffer.from(dekBase64, "base64");
+    if (dek.length !== 32) return null;
+    cachedDek = dek;
+    return dek;
+  } catch {
+    return null;
+  }
+}
+
+function decryptGranolaBlob(blob: Buffer): string | null {
+  try {
+    const dek = loadGranolaDek();
+    if (!dek) return null;
+    const iv = blob.subarray(0, 12);
+    const tag = blob.subarray(blob.length - 16);
+    const ciphertext = blob.subarray(12, blob.length - 16);
+    const decipher = createDecipheriv("aes-256-gcm", dek, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]).toString("utf-8");
+  } catch {
+    return null;
+  }
+}
 
 export interface GranolaDocument {
   id: string;
@@ -30,11 +85,14 @@ export class GranolaApiClient {
   private tokenExpiry: number = 0;
   private readonly apiUrl = "https://api.granola.ai/v2/get-documents";
 
-  // As of May 2026, Granola.app encrypts supabase.json -> supabase.json.enc.
-  // The plaintext access_token now lives in stored-accounts.json instead, which
-  // Granola.app auto-refreshes on normal usage (~6h JWT lifetime). Try that
-  // path first; fall back to legacy supabase.json for older Granola installs.
+  // As of June 2026, Granola.app v5.354+ writes ONLY the encrypted
+  // stored-accounts.json.enc; the plaintext file is no longer refreshed.
+  // Try encrypted first, then plaintext (older installs), then legacy
+  // supabase.json.
   private loadCredentials(): string | null {
+    const encToken = this.tryLoadFromStoredAccountsEnc();
+    if (encToken) return encToken;
+
     const storedAccountsToken = this.tryLoadFromStoredAccounts();
     if (storedAccountsToken) return storedAccountsToken;
 
@@ -42,27 +100,53 @@ export class GranolaApiClient {
     if (supabaseToken) return supabaseToken;
 
     console.error(
-      `Granola auth failed: neither stored-accounts.json nor supabase.json could be read at ${GRANOLA_APP_SUPPORT_PATH}. Is Granola.app installed and signed in?`
+      `Granola auth failed: neither stored-accounts.json.enc, stored-accounts.json, nor supabase.json could be read at ${GRANOLA_APP_SUPPORT_PATH}. Is Granola.app installed and signed in?`
     );
     return null;
+  }
+
+  private extractAccessTokenFromStoredAccountsPayload(
+    fileContent: string
+  ): string | null {
+    const data = JSON.parse(fileContent);
+    const accounts =
+      typeof data.accounts === "string"
+        ? JSON.parse(data.accounts)
+        : data.accounts;
+    if (!Array.isArray(accounts) || accounts.length === 0) return null;
+    const rawTokens = accounts[0].tokens;
+    const tokens =
+      typeof rawTokens === "string" ? JSON.parse(rawTokens) : rawTokens;
+    return tokens?.access_token ?? null;
+  }
+
+  private tryLoadFromStoredAccountsEnc(): string | null {
+    try {
+      const path = join(
+        GRANOLA_APP_SUPPORT_PATH,
+        "stored-accounts.json.enc"
+      );
+      const blob = readFileSync(path);
+      const plaintext = decryptGranolaBlob(blob);
+      if (!plaintext) return null;
+      const accessToken =
+        this.extractAccessTokenFromStoredAccountsPayload(plaintext);
+      if (!accessToken) return null;
+      this.tokenExpiry = Date.now() + 6 * 60 * 60 * 1000;
+      this.accessToken = accessToken;
+      return accessToken;
+    } catch {
+      return null;
+    }
   }
 
   private tryLoadFromStoredAccounts(): string | null {
     try {
       const path = join(GRANOLA_APP_SUPPORT_PATH, "stored-accounts.json");
       const fileContent = readFileSync(path, "utf-8");
-      const data = JSON.parse(fileContent);
-
-      const accounts = JSON.parse(data.accounts);
-      if (!Array.isArray(accounts) || accounts.length === 0) return null;
-
-      const tokens = JSON.parse(accounts[0].tokens);
-      const accessToken = tokens.access_token;
+      const accessToken =
+        this.extractAccessTokenFromStoredAccountsPayload(fileContent);
       if (!accessToken) return null;
-
-      // stored-accounts.json doesn't carry expires_in/obtained_at; assume 6h
-      // from the file's mtime. Granola.app refreshes the file as part of
-      // normal usage, so re-reading on cache miss is sufficient.
       this.tokenExpiry = Date.now() + 6 * 60 * 60 * 1000;
       this.accessToken = accessToken;
       return accessToken;
