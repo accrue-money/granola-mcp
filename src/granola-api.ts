@@ -64,6 +64,19 @@ function decryptGranolaBlob(blob: Buffer): string | null {
   }
 }
 
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf-8")
+    );
+    return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface GranolaDocument {
   id: string;
   title?: string;
@@ -100,7 +113,11 @@ export class GranolaApiClient {
     if (supabaseToken) return supabaseToken;
 
     console.error(
-      `Granola auth failed: neither stored-accounts.json.enc, stored-accounts.json, nor supabase.json could be read at ${GRANOLA_APP_SUPPORT_PATH}. Is Granola.app installed and signed in?`
+      "Granola auth failed: no usable token in stored-accounts.json.enc, " +
+        `stored-accounts.json, or supabase.json at ${GRANOLA_APP_SUPPORT_PATH}. ` +
+        "Granola.app v7+ no longer writes storage.dek, so the encrypted store " +
+        "cannot be decrypted. Set GRANOLA_API_KEY (Granola: Settings → " +
+        "Connectors → API keys) to use the supported public API instead."
     );
     return null;
   }
@@ -147,7 +164,22 @@ export class GranolaApiClient {
       const accessToken =
         this.extractAccessTokenFromStoredAccountsPayload(fileContent);
       if (!accessToken) return null;
-      this.tokenExpiry = Date.now() + 6 * 60 * 60 * 1000;
+
+      // Granola stopped refreshing the plaintext file once it moved to
+      // encrypted-only storage, so trusting it unconditionally returns a token
+      // months past expiry and the API answers with a bare 401 instead of an
+      // auth error. Honour the JWT's own expiry rather than assuming 6 hours.
+      const expiry = jwtExpiryMs(accessToken);
+      if (expiry !== null && Date.now() >= expiry) {
+        console.error(
+          `Granola auth: ${path} holds a token that expired at ` +
+            `${new Date(expiry).toISOString()}. Granola no longer refreshes ` +
+            "this file; the encrypted store could not be read."
+        );
+        return null;
+      }
+
+      this.tokenExpiry = expiry ?? Date.now() + 6 * 60 * 60 * 1000;
       this.accessToken = accessToken;
       return accessToken;
     } catch {

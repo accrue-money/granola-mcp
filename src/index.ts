@@ -8,9 +8,15 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { GranolaApiClient } from "./granola-api.js";
+import {
+  GranolaPublicApiClient,
+  formatTranscript,
+  speakerLabel,
+} from "./granola-public-api.js";
 import { convertProseMirrorToMarkdown } from "./prosemirror-converter.js";
 
 const apiClient = new GranolaApiClient();
+const publicApiClient = new GranolaPublicApiClient();
 
 const server = new Server(
   {
@@ -189,13 +195,35 @@ const tools: Tool[] = [
   },
   {
     name: "get_granola_raw_transcript",
-    description: "Get raw utterance-level transcript with timestamps and speaker sources.",
+    description:
+      "Get raw utterance-level transcript with per-utterance timestamps and speaker turns. " +
+      "Accepts either a not_* note id or a document UUID (as found in a notes.granola.ai URL). " +
+      "Prefer this over the claude.ai Granola connector's get_meeting_transcript when speaker " +
+      "turns or timing matter: the connector returns one flat string in which consecutive " +
+      "speakers merge with no boundary.",
     inputSchema: {
       type: "object",
       properties: {
         document_id: {
           type: "string",
-          description: "The document ID to get transcript for",
+          description:
+            "not_* note id, or the document UUID from a notes.granola.ai URL",
+        },
+        created_after: {
+          type: "string",
+          description:
+            "Optional ISO date lower bound; narrows the UUID-to-note_id crawl",
+        },
+        created_before: {
+          type: "string",
+          description:
+            "Optional ISO date upper bound; narrows the UUID-to-note_id crawl",
+        },
+        format: {
+          type: "string",
+          enum: ["markdown", "json"],
+          description:
+            "markdown (default) for timestamped reading; json for structured utterances",
         },
       },
       required: ["document_id"],
@@ -638,6 +666,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_granola_raw_transcript": {
         const documentId = args?.document_id as string;
+
+        if (publicApiClient.isConfigured()) {
+          const { note, utterances } = await publicApiClient.fetchTranscript(
+            documentId,
+            {
+              createdAfter: args?.created_after as string | undefined,
+              createdBefore: args?.created_before as string | undefined,
+            }
+          );
+
+          if (utterances.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "No transcript available for this note",
+                    note_id: note.id,
+                    title: note.title,
+                  }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          if (args?.format === "json") {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    {
+                      note_id: note.id,
+                      title: note.title,
+                      web_url: note.web_url,
+                      attendees: note.attendees,
+                      utterance_count: utterances.length,
+                      speaker_names_available: utterances.some(
+                        (u) => u.speaker?.name
+                      ),
+                      utterances: utterances.map((u) => ({
+                        speaker: speakerLabel(u.speaker),
+                        source: u.speaker?.source,
+                        attribution: u.speaker?.attribution,
+                        diarization_label: u.speaker?.diarization_label,
+                        text: u.text,
+                        start_time: u.start_time,
+                        end_time: u.end_time,
+                      })),
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+            };
+          }
+
+          return {
+            content: [
+              { type: "text", text: formatTranscript(note, utterances) },
+            ],
+          };
+        }
+
         const utterances = await apiClient.fetchDocumentTranscript(documentId);
 
         if (!utterances || utterances.length === 0) {
